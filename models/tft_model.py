@@ -8,13 +8,13 @@ from neural_common import build_full_frame, make_datasets, make_dataloaders, mak
 
 
 def run(panel, horizon: int, max_epochs: int = 10, max_encoder_length: int = 60, accelerator: str = "gpu",
-        logger=None, tag: str = "tft"):
+        logger=None, tag: str = "tft", batch_size: int = 512):
     torch.manual_seed(42)
     full_df = build_full_frame(panel)
     cutoff_idx = full_df["time_idx"].max() - horizon
 
     training, validation = make_datasets(full_df, cutoff_idx, horizon, max_encoder_length)
-    train_dl, val_dl = make_dataloaders(training, validation)
+    train_dl, val_dl = make_dataloaders(training, validation, batch_size=batch_size)
 
     model = TemporalFusionTransformer.from_dataset(
         training, learning_rate=0.03, hidden_size=16, attention_head_size=1,

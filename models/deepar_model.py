@@ -7,14 +7,14 @@ from neural_common import build_full_frame, make_datasets, make_dataloaders, mak
 
 
 def run(panel, horizon: int, max_epochs: int = 10, max_encoder_length: int = 60, accelerator: str = "gpu",
-        logger=None, tag: str = "deepar"):
+        logger=None, tag: str = "deepar", batch_size: int = 512):
     torch.manual_seed(42)
     full_df = build_full_frame(panel)
     cutoff_idx = full_df["time_idx"].max() - horizon
 
     training, validation = make_datasets(full_df, cutoff_idx, horizon, max_encoder_length,
                                           normalizer_transform=None)
-    train_dl, val_dl = make_dataloaders(training, validation)
+    train_dl, val_dl = make_dataloaders(training, validation, batch_size=batch_size)
 
     model = DeepAR.from_dataset(
         training, learning_rate=0.03, hidden_size=16, rnn_layers=2, dropout=0.1,

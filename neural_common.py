@@ -1,4 +1,5 @@
 """Shared TimeSeriesDataSet construction for the TFT and DeepAR benchmarks."""
+import os
 import pandas as pd
 import lightning.pytorch as pl
 from pytorch_forecasting import TimeSeriesDataSet
@@ -52,9 +53,20 @@ def make_datasets(full_df: pd.DataFrame, cutoff_idx: int, horizon: int, max_enco
     return training, validation
 
 
-def make_dataloaders(training, validation, batch_size=64, num_workers=0):
-    train_dl = training.to_dataloader(train=True, batch_size=batch_size, num_workers=num_workers)
-    val_dl = validation.to_dataloader(train=False, batch_size=batch_size * 2, num_workers=num_workers)
+def make_dataloaders(training, validation, batch_size=512, num_workers=None):
+    # batch_size=64 with num_workers=0 (the old defaults) left the GPU
+    # ~35% utilized and starved on CPU-side batch construction -- for a
+    # panel this size (100Ks of overlapping windows/epoch) that made a
+    # single epoch take 15+ minutes for a ~24K-param model. Bigger batches
+    # + parallel workers fixes the actual bottleneck (data loading, not
+    # compute).
+    if num_workers is None:
+        num_workers = min(8, max(1, (os.cpu_count() or 2) - 1))
+    persistent = num_workers > 0
+    train_dl = training.to_dataloader(train=True, batch_size=batch_size, num_workers=num_workers,
+                                       persistent_workers=persistent)
+    val_dl = validation.to_dataloader(train=False, batch_size=batch_size * 2, num_workers=num_workers,
+                                       persistent_workers=persistent)
     return train_dl, val_dl
 
 

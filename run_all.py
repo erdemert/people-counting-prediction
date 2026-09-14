@@ -35,6 +35,7 @@ def main():
     ap.add_argument("--accelerator", default="gpu", choices=["gpu", "cpu", "auto"])
     ap.add_argument("--max-stores", type=int, default=None,
                      help="optional cap on stores per brand, for a fast end-to-end trial")
+    ap.add_argument("--batch-size", type=int, default=512, help="neural models only")
     ap.add_argument("--output-root", default="outputs")
     args = ap.parse_args()
 
@@ -67,6 +68,7 @@ def main():
                 encoder_length=args.encoder_length, models=models,
                 accelerator=args.accelerator, max_stores=args.max_stores,
                 output_root=args.output_root, logger=brand_logger,
+                batch_size=args.batch_size,
             )
             all_summaries.append(summary)
             elapsed = time.time() - t0

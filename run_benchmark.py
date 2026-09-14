@@ -24,15 +24,16 @@ def _lazy_import_runners():
     if MODEL_RUNNERS:
         return
     from models import lightgbm_model, catboost_model, tft_model, deepar_model
-    MODEL_RUNNERS["lightgbm"] = lambda panel, horizon, epochs, enc_len, accel, log, tag: lightgbm_model.run(panel, horizon)
-    MODEL_RUNNERS["catboost"] = lambda panel, horizon, epochs, enc_len, accel, log, tag: catboost_model.run(panel, horizon)
-    MODEL_RUNNERS["tft"] = lambda panel, horizon, epochs, enc_len, accel, log, tag: tft_model.run(panel, horizon, epochs, enc_len, accel, log, tag)
-    MODEL_RUNNERS["deepar"] = lambda panel, horizon, epochs, enc_len, accel, log, tag: deepar_model.run(panel, horizon, epochs, enc_len, accel, log, tag)
+    MODEL_RUNNERS["lightgbm"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs: lightgbm_model.run(panel, horizon)
+    MODEL_RUNNERS["catboost"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs: catboost_model.run(panel, horizon)
+    MODEL_RUNNERS["tft"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs: tft_model.run(panel, horizon, epochs, enc_len, accel, log, tag, bs)
+    MODEL_RUNNERS["deepar"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs: deepar_model.run(panel, horizon, epochs, enc_len, accel, log, tag, bs)
 
 
 def run_brand(brand: str, horizon: int = 28, epochs: int = 30, encoder_length: int = 90,
               models=("lightgbm", "catboost", "tft", "deepar"), accelerator: str = "gpu",
-              max_stores: int = None, output_root: str = "outputs", logger=None) -> pd.DataFrame:
+              max_stores: int = None, output_root: str = "outputs", logger=None,
+              batch_size: int = 512) -> pd.DataFrame:
     """Trains+evaluates each requested model for one brand. Returns the summary DataFrame.
     Never raises for a single model's failure -- it's recorded in the summary with status=error
     so a full batch run keeps going."""
@@ -62,7 +63,7 @@ def run_brand(brand: str, horizon: int = 28, epochs: int = 30, encoder_length: i
         t0 = time.time()
         try:
             preds, _ = MODEL_RUNNERS[name](panel, horizon, epochs, encoder_length, accelerator,
-                                            log, f"{brand}:{name}")
+                                            log, f"{brand}:{name}", batch_size)
         except Exception as e:
             elapsed = time.time() - t0
             log.error(f"[{brand}] {name}: FAILED after {elapsed:.0f}s -- {e}", exc_info=True)
@@ -95,13 +96,14 @@ def main():
     ap.add_argument("--accelerator", default="gpu", choices=["gpu", "cpu", "auto"])
     ap.add_argument("--max-stores", type=int, default=None,
                      help="optional cap on number of stores, for a quick trial run")
+    ap.add_argument("--batch-size", type=int, default=512, help="neural models only")
     ap.add_argument("--output-root", default="outputs")
     args = ap.parse_args()
 
     logger = get_logger(f"benchmark.{args.brand}", log_file=os.path.join("logs", f"{args.brand}.log"))
     run_brand(args.brand, args.horizon, args.epochs, args.encoder_length,
               tuple(m.strip() for m in args.models.split(",") if m.strip()),
-              args.accelerator, args.max_stores, args.output_root, logger)
+              args.accelerator, args.max_stores, args.output_root, logger, args.batch_size)
 
 
 if __name__ == "__main__":
