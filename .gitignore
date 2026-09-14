@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+outputs/
+logs/
+lightning_logs/
+*.ckpt

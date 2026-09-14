@@ -1,0 +1,14 @@
+pandas==2.3.3
+numpy==2.2.6
+scikit-learn==1.7.2
+pyarrow==25.0.1
+lightgbm==4.7.0
+catboost==1.2.10
+tqdm==4.70.1
+lightning==2.6.6
+pytorch-forecasting==1.8.0
+torchmetrics==1.9.0
+# torch is intentionally NOT pinned here -- setup.sh installs the plain PyPI
+# wheel (`pip install torch`), which bundles its own CUDA runtime and uses
+# whatever driver is already on the machine. No system CUDA install/changes
+# are performed by this repo. Developed against torch 2.14.0.
