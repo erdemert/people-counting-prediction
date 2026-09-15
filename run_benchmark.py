@@ -51,6 +51,22 @@ def run_brand(brand: str, horizon: int = 28, epochs: int = 30, encoder_length: i
     if max_stores:
         keep = panel["store_id"].drop_duplicates().head(max_stores)
         panel = panel[panel["store_id"].isin(keep)]
+
+    # Drop stores with zero rows before the train/test cutoff -- a store that
+    # only started appearing inside the last `horizon` days has no history to
+    # learn from, and forecasting it crashes every model differently (KeyError
+    # in the tabular recursive loop, "unknown category" in the neural
+    # TimeSeriesDataSet). Excluding it here, once, keeps all 4 models
+    # consistent instead of patching each one separately.
+    cutoff = panel["date"].max() - pd.Timedelta(days=horizon)
+    has_history = panel.loc[panel["date"] <= cutoff, "store_id"].unique()
+    too_new = set(panel["store_id"].unique()) - set(has_history)
+    if too_new:
+        names = panel.loc[panel["store_id"].isin(too_new), "store_name"].unique().tolist()
+        log.warning(f"[{brand}] dropping {len(too_new)} store(s) with no history before the "
+                    f"{horizon}-day cutoff (too new to forecast): {names}")
+        panel = panel[panel["store_id"].isin(has_history)]
+
     n_stores = panel["store_id"].nunique()
     log.info(f"panel ready: {len(panel):,} rows, {n_stores} stores, "
              f"{panel['date'].min().date()} .. {panel['date'].max().date()}, "
