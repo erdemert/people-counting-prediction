@@ -137,7 +137,13 @@ def make_trainer(max_epochs: int, accelerator: str = "gpu", devices=1, callbacks
 
 def predictions_to_frame(model, val_dl, validation) -> pd.DataFrame:
     """Returns a long dataframe: store_id, time_idx, y_pred (point / median forecast)."""
-    raw = model.predict(val_dl, mode="prediction", return_index=True)
+    # model.predict() spins up its own *new* internal Trainer for this call,
+    # separate from the one used for trainer.fit() (which we set logger=False
+    # on) -- without trainer_kwargs here, that new Trainer defaults to
+    # logger=True, which tries to init TensorBoard and crashes on this box due
+    # to a broken pyOpenSSL/cryptography install unrelated to this project.
+    raw = model.predict(val_dl, mode="prediction", return_index=True,
+                         trainer_kwargs=dict(logger=False, enable_progress_bar=False))
     preds = raw.output
     index = raw.index
     rows = []
