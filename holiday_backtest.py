@@ -77,7 +77,7 @@ def run_holiday_backtest(brand: str, test_end: str, horizon: int = 28,
                           models=("lightgbm", "catboost", "tft", "deepar"),
                           accelerator: str = "gpu", output_root: str = "outputs",
                           logger=None, **neural_overrides):
-    """Returns (period_summary_df, region_period_df). Both also written to disk."""
+    """Returns (period_summary_df, region_period_df, day_summary_df). All also written to disk."""
     log = logger or get_logger(f"holiday.{brand}")
     _lazy_import_runners()
 
@@ -142,32 +142,57 @@ def run_holiday_backtest(brand: str, test_end: str, horizon: int = 28,
 
     if not all_tagged:
         log.warning(f"[{brand}] no model produced results -- nothing to report")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     combined = pd.concat(all_tagged, ignore_index=True)
     tag = cutoff.date().isoformat()
+    # day_offset: 1 = first day forecast, 2 = second, etc. Needed because
+    # recursive tabular models (LightGBM/CatBoost) compound error the further
+    # into the horizon they go, while TFT/DeepAR forecast the whole horizon
+    # directly and don't -- so comparing period buckets alone can unfairly
+    # penalize the recursive models if "baseline" happens to sit later in the
+    # horizon than "holiday" does. Keeping day_offset (and region, since a
+    # holiday for one region can be a baseline day for another on the exact
+    # same date) lets you control for that: compare models at matched
+    # forecast depth, or trace the full day-by-day trend into and through
+    # the holiday, instead of only three collapsed buckets.
+    combined["day_offset"] = (combined["date"] - cutoff).dt.days
     combined.to_csv(os.path.join(out_dir, f"holiday_preds_{tag}.csv"), index=False)
 
     period_rows = []
     region_rows = []
+    day_rows = []
     for (model, period), g in combined.groupby(["model", "period"]):
         overall, _ = evaluate(g, "y_true", "y_pred")
         period_rows.append(dict(brand=brand, model=model, period=period, **overall))
     for (model, period, region), g in combined.groupby(["model", "period", "region"]):
         overall, _ = evaluate(g, "y_true", "y_pred")
         region_rows.append(dict(brand=brand, model=model, period=period, region=region, **overall))
+    for (model, region, day_offset), g in combined.groupby(["model", "region", "day_offset"]):
+        overall, _ = evaluate(g, "y_true", "y_pred")
+        # period/date are deterministic for a given (region, day_offset) since
+        # cutoff is fixed -- every row in g shares the same one, just read it
+        # off the first row rather than re-deriving it.
+        day_rows.append(dict(brand=brand, model=model, region=region, day_offset=day_offset,
+                              date=g["date"].iloc[0].date(), period=g["period"].iloc[0],
+                              holiday_label=g["holiday_label"].iloc[0], **overall))
 
     period_summary = pd.DataFrame(period_rows).sort_values(["period", "model"])
     region_summary = pd.DataFrame(region_rows).sort_values(["period", "region", "model"])
+    day_summary = pd.DataFrame(day_rows).sort_values(["region", "day_offset", "model"])
 
     period_path = os.path.join(out_dir, f"holiday_eval_{tag}.csv")
     region_path = os.path.join(out_dir, f"holiday_eval_by_region_{tag}.csv")
+    day_path = os.path.join(out_dir, f"holiday_eval_by_day_{tag}.csv")
     period_summary.to_csv(period_path, index=False)
     region_summary.to_csv(region_path, index=False)
+    day_summary.to_csv(day_path, index=False)
 
     log.info(f"[{brand}] holiday/pre-holiday/baseline results:\n{period_summary.to_string(index=False)}")
-    log.info(f"[{brand}] saved: {period_path}\n[{brand}] saved (by region): {region_path}")
-    return period_summary, region_summary
+    log.info(f"[{brand}] saved: {period_path}\n[{brand}] saved (by region): {region_path}\n"
+             f"[{brand}] saved (by day, for a horizon-depth-controlled/fair comparison and the "
+             f"full day-by-day trend): {day_path}")
+    return period_summary, region_summary, day_summary
 
 
 def main():
