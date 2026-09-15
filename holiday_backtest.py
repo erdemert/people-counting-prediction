@@ -111,6 +111,28 @@ def run_holiday_backtest(brand: str, test_end: str, horizon: int = 28,
                     f"{cutoff.date()}: {names}")
         truncated = truncated[truncated["store_id"].isin(has_history)]
 
+    # Symmetric guard: a store that stopped reporting *before* window_end
+    # (closed, a pop-up that ended, etc.) has no data to evaluate against in
+    # our chosen holiday window at all. Worse, for TFT/DeepAR this silently
+    # corrupts results rather than erroring: pytorch-forecasting's
+    # predict=True picks each *group's own* last available window, not one
+    # aligned to a single global cutoff -- so a closed store gets evaluated
+    # on its own old last-active window (sometimes a year+ earlier) instead
+    # of being skipped, showing up as bogus negative day_offset rows utterly
+    # unrelated to the holiday being tested. LightGBM/CatBoost don't have
+    # this failure mode (their recursive forecast only ever produces rows
+    # for dates that exist in the real test slice), so this guard mainly
+    # protects the neural models, but is applied to all four for consistency.
+    STALE_TOLERANCE_DAYS = 3
+    last_date = truncated.groupby("store_id")["date"].max()
+    still_open = last_date[last_date >= window_end - pd.Timedelta(days=STALE_TOLERANCE_DAYS)].index
+    closed_early = set(truncated["store_id"].unique()) - set(still_open)
+    if closed_early:
+        names = truncated.loc[truncated["store_id"].isin(closed_early), "store_name"].unique().tolist()
+        log.warning(f"[{brand}] dropping {len(closed_early)} store(s) whose data ends before the "
+                    f"{window_end.date()} evaluation window (closed/discontinued): {names}")
+        truncated = truncated[truncated["store_id"].isin(still_open)]
+
     log.info(f"[{brand}] backtest window: train up to {cutoff.date()}, evaluate "
              f"{(cutoff + pd.Timedelta(days=1)).date()} .. {window_end.date()} ({horizon}d), "
              f"{truncated['store_id'].nunique()} stores, regions={sorted(truncated['region'].unique())}")
