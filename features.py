@@ -41,15 +41,23 @@ def add_calendar_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
         valid_next = pos < len(ev_dates)
         next_days[valid_next] = (ev_dates[pos[valid_next]] - dates[valid_next]).astype("timedelta64[D]").astype(float)
 
+        # An exact hit (next_days == 0) means dates[i] IS an event day itself --
+        # searchsorted(side="left") puts `pos` AT the match in that case, not
+        # after it, so the "today" check must look at `pos`, not `pos - 1`.
+        # (Previously this checked `prev_days == 0` using `pos - 1`, which
+        # only ever matched a date exactly one day after some *earlier*
+        # event -- so holiday_today was silently "none" on every actual
+        # holiday day, for every region, the whole time.)
+        exact_today = valid_next & (next_days == 0)
+
         prev_pos = pos - 1
         prev_days = np.full(len(dates), MAX_HORIZON_DAYS, dtype=float)
         valid_prev = prev_pos >= 0
         prev_days[valid_prev] = (dates[valid_prev] - ev_dates[prev_pos[valid_prev]]).astype("timedelta64[D]").astype(float)
+        prev_days[exact_today] = 0  # the "last" holiday on a holiday day is today itself
 
         today_label = np.array(["none"] * len(dates), dtype=object)
-        exact = (prev_days == 0)
-        if exact.any():
-            today_label[exact] = ev_labels[prev_pos[exact]]
+        today_label[exact_today] = ev_labels[pos[exact_today]]
 
         out_next[idx] = np.minimum(next_days, MAX_HORIZON_DAYS)
         out_prev[idx] = np.minimum(prev_days, MAX_HORIZON_DAYS)
