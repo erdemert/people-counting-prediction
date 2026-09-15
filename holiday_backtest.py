@@ -159,6 +159,18 @@ def run_holiday_backtest(brand: str, test_end: str, horizon: int = 28,
             continue
         tagged = tag_holiday_period(preds)
         tagged["model"] = name
+        # Even with the closed-store guard above, a store allowed through by
+        # STALE_TOLERANCE_DAYS can still have its predicted window run a day
+        # or two past its own real last date (TFT/DeepAR predict a fixed
+        # horizon length regardless), producing rows with no matching ground
+        # truth (NaN y_true) -- unscoreable, and left in, they NaN out the
+        # whole bucket average they land in (usually the last day_offsets,
+        # i.e. "baseline"). Drop them here as a general safety net.
+        unscoreable = tagged["y_true"].isna()
+        if unscoreable.any():
+            log.warning(f"[{brand}] {name}: dropping {unscoreable.sum()} row(s) with no matching "
+                        f"ground truth (predicted past a store's real last date)")
+            tagged = tagged[~unscoreable]
         all_tagged.append(tagged)
         log.info(f"[{brand}] {name}: done ({len(tagged)} test rows)")
 
