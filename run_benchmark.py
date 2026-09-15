@@ -96,8 +96,16 @@ def run_brand(brand: str, horizon: int = 28, epochs: int = 30, encoder_length: i
                  f"WAPE={overall['WAPE']:.2f} sMAPE={overall['sMAPE']:.2f} "
                  f"MAE={overall['MAE']:.2f} RMSE={overall['RMSE']:.2f}")
 
-    summary = pd.DataFrame(summary_rows).sort_values("WAPE")
-    summary.to_csv(os.path.join(out_dir, "summary.csv"), index=False)
+    new_summary = pd.DataFrame(summary_rows)
+    summary_path = os.path.join(out_dir, "summary.csv")
+    if os.path.exists(summary_path):
+        # Merge, don't clobber -- e.g. re-running with --models tft,deepar
+        # after LightGBM/CatBoost already succeeded shouldn't erase those rows.
+        prior = pd.read_csv(summary_path)
+        prior = prior[~prior["model"].isin(models)]
+        new_summary = pd.concat([prior, new_summary], ignore_index=True)
+    summary = new_summary.sort_values("WAPE")
+    summary.to_csv(summary_path, index=False)
     log.info(f"[{brand}] summary:\n{summary.to_string(index=False)}")
     return summary
 
