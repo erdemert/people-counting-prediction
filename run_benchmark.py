@@ -24,17 +24,19 @@ def _lazy_import_runners():
     if MODEL_RUNNERS:
         return
     from models import lightgbm_model, catboost_model, tft_model, deepar_model
-    MODEL_RUNNERS["lightgbm"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs, ltb, lvb: lightgbm_model.run(panel, horizon)
-    MODEL_RUNNERS["catboost"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs, ltb, lvb: catboost_model.run(panel, horizon)
-    MODEL_RUNNERS["tft"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs, ltb, lvb: tft_model.run(panel, horizon, epochs, enc_len, accel, log, tag, bs, ltb, lvb)
-    MODEL_RUNNERS["deepar"] = lambda panel, horizon, epochs, enc_len, accel, log, tag, bs, ltb, lvb: deepar_model.run(panel, horizon, epochs, enc_len, accel, log, tag, bs, ltb, lvb)
+    # lightgbm/catboost ignore neural_kwargs (batch_size, limit_train_batches,
+    # num_workers, precision, ...) -- those only mean something for TFT/DeepAR.
+    MODEL_RUNNERS["lightgbm"] = lambda panel, horizon, kw: lightgbm_model.run(panel, horizon)
+    MODEL_RUNNERS["catboost"] = lambda panel, horizon, kw: catboost_model.run(panel, horizon)
+    MODEL_RUNNERS["tft"] = lambda panel, horizon, kw: tft_model.run(panel, horizon, **kw)
+    MODEL_RUNNERS["deepar"] = lambda panel, horizon, kw: deepar_model.run(panel, horizon, **kw)
 
 
-def run_brand(brand: str, horizon: int = 28, epochs: int = 30, encoder_length: int = 90,
-              models=("lightgbm", "catboost", "tft", "deepar"), accelerator: str = "gpu",
-              max_stores: int = None, output_root: str = "outputs", logger=None,
-              batch_size: int = 512, limit_train_batches: int = 300,
-              limit_val_batches: int = 60) -> pd.DataFrame:
+def run_brand(brand: str, horizon: int = 28, models=("lightgbm", "catboost", "tft", "deepar"),
+              accelerator: str = "gpu", max_stores: int = None, output_root: str = "outputs",
+              logger=None, epochs: int = 30, encoder_length: int = 90, batch_size: int = 512,
+              limit_train_batches: int = 300, limit_val_batches: int = 60,
+              num_workers: int = None, precision: str = "32-true") -> pd.DataFrame:
     """Trains+evaluates each requested model for one brand. Returns the summary DataFrame.
     Never raises for a single model's failure -- it's recorded in the summary with status=error
     so a full batch run keeps going."""
@@ -73,17 +75,20 @@ def run_brand(brand: str, horizon: int = 28, epochs: int = 30, encoder_length: i
              f"{panel['date'].min().date()} .. {panel['date'].max().date()}, "
              f"regions={sorted(panel['region'].unique())}")
 
+    neural_kwargs = dict(
+        max_epochs=epochs, max_encoder_length=encoder_length, accelerator=accelerator,
+        batch_size=batch_size, limit_train_batches=limit_train_batches,
+        limit_val_batches=limit_val_batches, num_workers=num_workers, precision=precision,
+    )
+
     summary_rows = []
     for name in models:
-        log.info(f"[{brand}] {name}: starting (horizon={horizon}, epochs={epochs}, "
-                 f"encoder_length={encoder_length}, accelerator={accelerator}, "
-                 f"batch_size={batch_size}, limit_train_batches={limit_train_batches}, "
-                 f"limit_val_batches={limit_val_batches})")
+        kw = dict(neural_kwargs, logger=log, tag=f"{brand}:{name}") if name in ("tft", "deepar") else {}
+        log.info(f"[{brand}] {name}: starting (horizon={horizon}"
+                 + (f", {', '.join(f'{k}={v}' for k, v in neural_kwargs.items())})" if name in ("tft", "deepar") else ")"))
         t0 = time.time()
         try:
-            preds, _ = MODEL_RUNNERS[name](panel, horizon, epochs, encoder_length, accelerator,
-                                            log, f"{brand}:{name}", batch_size,
-                                            limit_train_batches, limit_val_batches)
+            preds, _ = MODEL_RUNNERS[name](panel, horizon, kw)
         except Exception as e:
             elapsed = time.time() - t0
             log.error(f"[{brand}] {name}: FAILED after {elapsed:.0f}s -- {e}", exc_info=True)
@@ -131,14 +136,21 @@ def main():
                           "generates huge numbers of near-duplicate overlapping windows, so capping "
                           "this is the actual lever for epoch time, not batch_size/num_workers)")
     ap.add_argument("--limit-val-batches", type=int, default=60, help="neural models only")
+    ap.add_argument("--num-workers", type=int, default=None,
+                     help="neural models only -- CPU workers building training windows in parallel; "
+                          "default is (cpu_count - 1). Raise/lower if the GPU sits idle waiting on data.")
+    ap.add_argument("--precision", default="32-true", choices=["32-true", "16-mixed", "bf16-mixed"],
+                     help="neural models only -- try 16-mixed/bf16-mixed on a GPU with Tensor Cores "
+                          "(e.g. T4) for a further speedup once CPU is no longer the bottleneck")
     ap.add_argument("--output-root", default="outputs")
     args = ap.parse_args()
 
     logger = get_logger(f"benchmark.{args.brand}", log_file=os.path.join("logs", f"{args.brand}.log"))
-    run_brand(args.brand, args.horizon, args.epochs, args.encoder_length,
+    run_brand(args.brand, args.horizon,
               tuple(m.strip() for m in args.models.split(",") if m.strip()),
-              args.accelerator, args.max_stores, args.output_root, logger, args.batch_size,
-              args.limit_train_batches, args.limit_val_batches)
+              args.accelerator, args.max_stores, args.output_root, logger,
+              args.epochs, args.encoder_length, args.batch_size, args.limit_train_batches,
+              args.limit_val_batches, args.num_workers, args.precision)
 
 
 if __name__ == "__main__":

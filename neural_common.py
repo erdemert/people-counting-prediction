@@ -61,7 +61,11 @@ def make_dataloaders(training, validation, batch_size=512, num_workers=None):
     # + parallel workers fixes the actual bottleneck (data loading, not
     # compute).
     if num_workers is None:
-        num_workers = min(8, max(1, (os.cpu_count() or 2) - 1))
+        # No cap at 8 anymore -- profiling shows the real bottleneck is CPU-side
+        # per-sample window construction (TimeSeriesDataSet.__getitem__), not
+        # GPU compute or batch size, so more parallel workers is a genuine lever
+        # here, not just a nicety. Use whatever cores the box actually has.
+        num_workers = max(1, (os.cpu_count() or 2) - 1)
     persistent = num_workers > 0
     train_dl = training.to_dataloader(train=True, batch_size=batch_size, num_workers=num_workers,
                                        persistent_workers=persistent)
@@ -99,7 +103,7 @@ class EpochLogger(pl.Callback):
 
 
 def make_trainer(max_epochs: int, accelerator: str = "gpu", devices=1, callbacks=None,
-                  limit_train_batches=300, limit_val_batches=60):
+                  limit_train_batches=300, limit_val_batches=60, precision="32-true"):
     # devices=1 on purpose: run_all.py/run_benchmark.py loop sequentially over
     # many brands/models in one script. devices="auto" on a multi-GPU box makes
     # Lightning launch DDP, which re-execs this whole script per extra GPU rank
@@ -120,6 +124,7 @@ def make_trainer(max_epochs: int, accelerator: str = "gpu", devices=1, callbacks
         enable_progress_bar=False, logger=False, enable_checkpointing=False,
         gradient_clip_val=0.1, callbacks=callbacks or [],
         limit_train_batches=limit_train_batches, limit_val_batches=limit_val_batches,
+        precision=precision,
     )
 
 

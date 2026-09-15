@@ -40,6 +40,10 @@ def main():
                      help="neural models only -- cap batches/epoch, the actual lever for TFT/DeepAR "
                           "epoch time on a large panel (see run_benchmark.py --help)")
     ap.add_argument("--limit-val-batches", type=int, default=60, help="neural models only")
+    ap.add_argument("--num-workers", type=int, default=None,
+                     help="neural models only -- default is (cpu_count - 1)")
+    ap.add_argument("--precision", default="32-true", choices=["32-true", "16-mixed", "bf16-mixed"],
+                     help="neural models only")
     ap.add_argument("--output-root", default="outputs")
     args = ap.parse_args()
 
@@ -73,7 +77,8 @@ def main():
                 accelerator=args.accelerator, max_stores=args.max_stores,
                 output_root=args.output_root, logger=brand_logger,
                 batch_size=args.batch_size, limit_train_batches=args.limit_train_batches,
-                limit_val_batches=args.limit_val_batches,
+                limit_val_batches=args.limit_val_batches, num_workers=args.num_workers,
+                precision=args.precision,
             )
             all_summaries.append(summary)
             elapsed = time.time() - t0
