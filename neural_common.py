@@ -67,10 +67,17 @@ def make_dataloaders(training, validation, batch_size=512, num_workers=None):
         # here, not just a nicety. Use whatever cores the box actually has.
         num_workers = max(1, (os.cpu_count() or 2) - 1)
     persistent = num_workers > 0
+    # Validation only processes limit_val_batches (default 60) once per epoch,
+    # vs. limit_train_batches (default 300) for training -- giving it the same
+    # worker count as training buys nothing and just doubles the process count
+    # for no benefit (a single run was spawning 1 + num_workers*2 processes;
+    # this cuts it to roughly 1 + num_workers*1.3).
+    val_workers = min(2, num_workers)
+    val_persistent = val_workers > 0
     train_dl = training.to_dataloader(train=True, batch_size=batch_size, num_workers=num_workers,
                                        persistent_workers=persistent)
-    val_dl = validation.to_dataloader(train=False, batch_size=batch_size * 2, num_workers=num_workers,
-                                       persistent_workers=persistent)
+    val_dl = validation.to_dataloader(train=False, batch_size=batch_size * 2, num_workers=val_workers,
+                                       persistent_workers=val_persistent)
     return train_dl, val_dl
 
 
