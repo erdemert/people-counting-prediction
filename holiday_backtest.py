@@ -191,26 +191,7 @@ def run_holiday_backtest(brand: str, test_end: str, horizon: int = 28,
     # forecast depth, or trace the full day-by-day trend into and through
     # the holiday, instead of only three collapsed buckets.
     combined["day_offset"] = (combined["date"] - cutoff).dt.days
-
-    def _merge_write(new_df: pd.DataFrame, path: str, sort_cols):
-        # Same "merge, don't clobber" logic as run_benchmark.py's summary.csv --
-        # re-running with --models tft,deepar after lightgbm/catboost already
-        # succeeded for this test_end should add to the file, not erase them.
-        if os.path.exists(path):
-            prior = pd.read_csv(path)
-            prior = prior[~prior["model"].isin(models)]
-            new_df = pd.concat([prior, new_df], ignore_index=True)
-        new_df = new_df.sort_values(sort_cols)
-        new_df.to_csv(path, index=False)
-        return new_df
-
-    preds_path = os.path.join(out_dir, f"holiday_preds_{tag}.csv")
-    # Use the merged (old models from disk + newly-run ones) result for all
-    # downstream aggregation, not just the models from *this* call -- so
-    # re-running with --models tft,deepar reports on all 4 models together,
-    # not only the 2 just run.
-    combined = _merge_write(combined, preds_path, ["model", "region", "day_offset"])
-    combined["date"] = pd.to_datetime(combined["date"])  # round-tripped through CSV as a string
+    combined.to_csv(os.path.join(out_dir, f"holiday_preds_{tag}.csv"), index=False)
 
     period_rows = []
     region_rows = []
