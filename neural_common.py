@@ -98,7 +98,8 @@ class EpochLogger(pl.Callback):
                            f"({elapsed:.0f}s){': ' + parts if parts else ''}")
 
 
-def make_trainer(max_epochs: int, accelerator: str = "gpu", devices=1, callbacks=None):
+def make_trainer(max_epochs: int, accelerator: str = "gpu", devices=1, callbacks=None,
+                  limit_train_batches=300, limit_val_batches=60):
     # devices=1 on purpose: run_all.py/run_benchmark.py loop sequentially over
     # many brands/models in one script. devices="auto" on a multi-GPU box makes
     # Lightning launch DDP, which re-execs this whole script per extra GPU rank
@@ -106,10 +107,19 @@ def make_trainer(max_epochs: int, accelerator: str = "gpu", devices=1, callbacks
     # already fast enough at this data scale; parallelize across brands
     # instead (e.g. run separate processes pinned to CUDA_VISIBLE_DEVICES=0/1)
     # if you want to use both GPUs at once.
+    #
+    # limit_train_batches/limit_val_batches: TFT/DeepAR are LSTM-based, so
+    # cost scales with *sequential timesteps* (encoder+decoder length), not
+    # batch size -- bigger batches don't fix a slow epoch here. The real
+    # problem is a large panel generates hundreds of thousands of heavily
+    # overlapping day-shifted windows per epoch (adjacent windows for the
+    # same store are nearly identical), so capping how many batches an
+    # epoch actually uses is the correct lever, not batch_size/num_workers.
     return pl.Trainer(
         max_epochs=max_epochs, accelerator=accelerator, devices=devices,
         enable_progress_bar=False, logger=False, enable_checkpointing=False,
         gradient_clip_val=0.1, callbacks=callbacks or [],
+        limit_train_batches=limit_train_batches, limit_val_batches=limit_val_batches,
     )
 
 

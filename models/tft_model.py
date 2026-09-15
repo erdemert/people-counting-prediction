@@ -8,7 +8,8 @@ from neural_common import build_full_frame, make_datasets, make_dataloaders, mak
 
 
 def run(panel, horizon: int, max_epochs: int = 10, max_encoder_length: int = 60, accelerator: str = "gpu",
-        logger=None, tag: str = "tft", batch_size: int = 512):
+        logger=None, tag: str = "tft", batch_size: int = 512,
+        limit_train_batches=300, limit_val_batches=60):
     torch.manual_seed(42)
     full_df = build_full_frame(panel)
     cutoff_idx = full_df["time_idx"].max() - horizon
@@ -22,7 +23,8 @@ def run(panel, horizon: int, max_epochs: int = 10, max_encoder_length: int = 60,
         log_interval=0, reduce_on_plateau_patience=4,
     )
     callbacks = [EpochLogger(logger, tag)] if logger else None
-    trainer = make_trainer(max_epochs, accelerator=accelerator, callbacks=callbacks)
+    trainer = make_trainer(max_epochs, accelerator=accelerator, callbacks=callbacks,
+                            limit_train_batches=limit_train_batches, limit_val_batches=limit_val_batches)
     trainer.fit(model, train_dataloaders=train_dl, val_dataloaders=val_dl)
 
     pred_frame = predictions_to_frame(model, val_dl, validation)
